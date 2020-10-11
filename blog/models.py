@@ -1,5 +1,16 @@
+import random
+import string
+
 from django.db import models
 from django.db.models import Model, Count, F, Q, Sum, Case, When, Value, IntegerField, Prefetch
+
+from utilities.common import clock, rnd_string, rnd_number
+
+
+def adjust_posts_with_tags():
+    for tag in Tag.objects.all():
+        while not [p for p in Post.objects.all() if tag in p.tags.all()]:
+            Post.create_n_post(5)
 
 
 class Tag(Model):
@@ -11,7 +22,15 @@ class Tag(Model):
 
     name = models.CharField(max_length=TAG_SIZE, blank=False, null=False)
 
+    @classmethod
+    def get_n_tag_randomly(cls, n):
+        tag_qs = cls.objects.all()
+        return random.sample(set(tag_qs), n)
+
     def __repr__(self):
+        return self.name
+
+    def __str__(self):
         return self.name
 
 
@@ -24,33 +43,56 @@ class Post(Model):
     name = models.CharField(max_length=20, blank=False, null=False)
     created = models.DateTimeField(auto_now=True)
 
+    def __str__(self):
+        return self.name
+
     def __repr__(self):
-        return f"{self.name}, tags: {self.tags.all()}"
+        return f'id:{self.pk},  name:{self.name}, tags: {self.tags.only("id")}'
 
-    # def orm_get_similar_by_n_tag(self, similarity_rank=1, returned_count=1):
-    #     xposts = self.__class__.objects.prefetch_related('tags').all()
-    #     res = [p for p in xposts if (p.tags.all() & self.tags.all()).count() == similarity_rank]
-    #     return res[:returned_count] if len(res) > returned_count else res
+    # @clock
+    # def get_similar_by_n_tag(self, similarity=1):
+    #     qs = self.__class__.objects.prefetch_related('tags').all()
+    #     res = [p for p in qs if (p.tags.all() & self.tags.all()).count() == similarity]
+    #     return res
 
-    def orm_get_similar_by_n_tag(self, similarity_rank=1, returned_count=1):
-        xposts = self.__class__.objects.prefetch_related(
-            Prefetch('tags', Tag.objects.filter(pk__in=self.tags), 'sim_tags')
-        )
-        res = [p for p in xposts.all() if p.sim_tags.count() == similarity_rank]
-        return res[:returned_count] if len(res) > returned_count else res
+    @classmethod
+    def create_n_post(cls, n):
+        for _ in range(n):
+            name = f"{rnd_string(4)} - {rnd_number(4)}"
+            post = cls.objects.create(name=name)
+            tag_numb = random.randint(0, 10)
+            random_tags = Tag.get_n_tag_randomly(tag_numb)
+            post.tags.add(*random_tags)
+        return
 
-    # def orm_get_similar_by_n_tag(self, similarity_rank=1, returned_count=1):
-    #     xposts = self.__class__.objects.annotate(
-    #         similarity=F("tags.all()").aggregate(similar_tag_count=Sum(
-    #             Case(
-    #                 When(id__in=self.tags.all().values_list("id", flat=True), then=Value(1)),
-    #                 default=Value(0),
-    #                 output_field=IntegerField(),
-    #             )
-    #         ))['similar_tag_count']
-    #     )
-    #     res = [p for p in xposts if p.similarity == similarity_rank]
-    #     return res[:returned_count] if len(res) > returned_count else res
+    @clock
+    def get_similar_by_n_tag(self, similarity=1):
+        """ вернет список объектов Post у к-х
+            количество общих, с данной записью, тегов равно similarity
+        """
+        qs = self.__class__.objects.prefetch_related(
+            Prefetch(
+                lookup='tags',
+                queryset=Tag.objects.filter(pk__in=self.tags.all()),
+                to_attr='same_tags')
+        ).all()
+        #
+        res = [p for p in qs.all() if len(p.same_tags) == similarity]
+        print(len(res))
+        return res
+
+    @clock
+    def get_n_post_most_similar_by_tags_to_self(self, ret_count=0):
+        qs = self.__class__.objects.prefetch_related(
+            Prefetch(
+                lookup='tags',
+                queryset=Tag.objects.filter(pk__in=self.tags.all()),
+                to_attr='same_tags')
+        ).all()
+        res = [p for p in qs.order_by('tags__count').desc()]
+        if ret_count:
+            res = res[:ret_count]
+        return res
 
 
 class Person(models.Model):
@@ -72,6 +114,6 @@ class Membership(models.Model):
     inviter = models.ForeignKey(
         Person,
         on_delete=models.CASCADE,
-        related_name="membership_invites",
+        related_name='membership_invites',
     )
     invite_reason = models.CharField(max_length=64)

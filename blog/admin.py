@@ -6,7 +6,12 @@ from .models import Post, Tag
 # Register your models here.
 @admin.register(Tag)
 class TagAdmin(admin.ModelAdmin):
-    pass
+    fields = ['name']
+    list_display = ['name']
+
+
+class TagInline(admin.StackedInline):
+    model = Post.tags.through
 
 
 @admin.register(Post)
@@ -14,8 +19,9 @@ class PostAdmin(admin.ModelAdmin):
     fields = ['name', 'tags']
     list_display = ['name', 'show_tags']
 
-    def show_tags(self, obj):
-        return "\n".join([a.name for a in obj.tags.all()])
+    inlines = (TagInline,)
 
+    def show_tags(self, obj):
+        return " .___. ".join([a.name for a in obj.tags.all()])
 
 
