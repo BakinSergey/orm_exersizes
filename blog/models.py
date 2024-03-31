@@ -1,8 +1,7 @@
 import random
-import string
 
 from django.db import models
-from django.db.models import Model, Count, F, Q, Sum, Case, When, Value, IntegerField, Prefetch
+from django.db.models import Model, Count, Q, Prefetch
 
 from utilities.common import clock, rnd_string, rnd_number
 
@@ -65,31 +64,42 @@ class Post(Model):
             post.tags.add(*random_tags)
         return
 
+    def get_tags_count(self):
+        return self.tags.all().count
+
     @clock
-    def get_similar_by_n_tag(self, similarity=1):
+    def get_similar_no_less_than_n_tag(self, similarity=1):
         """ вернет список объектов Post у к-х
             количество общих, с данной записью, тегов равно similarity
         """
+
+        qs = Post.objects.annotate(cmn_tags_cnt=Count('tags',
+                                                      filter=Q(tags__in=self.tags.all()))) \
+            .filter(Q(cmn_tags_cnt__gte=similarity) & ~Q(pk=self.pk)).values('pk', 'cmn_tags_cnt')
+
+        print(qs.query)
+        return qs
+
+    @clock
+    def x_get_similar_by_n_tag(self, similarity=1):
         qs = self.__class__.objects.prefetch_related(
             Prefetch(
                 lookup='tags',
                 queryset=Tag.objects.filter(pk__in=self.tags.all()),
                 to_attr='same_tags')
-        ).all()
-        #
-        res = [p for p in qs.all() if len(p.same_tags) == similarity]
-        print(len(res))
-        return res
+        ).annotate(c=Count('same_tags')).filter(c=similarity)
+        return qs
 
     @clock
     def get_n_post_most_similar_by_tags_to_self(self, ret_count=0):
+
         qs = self.__class__.objects.prefetch_related(
             Prefetch(
                 lookup='tags',
                 queryset=Tag.objects.filter(pk__in=self.tags.all()),
                 to_attr='same_tags')
         ).all()
-        res = [p for p in qs.order_by('tags__count').desc()]
+        res = [p for p in qs.order_by('same_tags__count').desc()]
         if ret_count:
             res = res[:ret_count]
         return res
